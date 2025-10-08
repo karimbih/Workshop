@@ -1,15 +1,14 @@
-<!doctype html><html><head>
+<!doctype html><html lang="fr"><head>
 <meta charset="utf-8"/>
-<title>Mission Gaïa – Lobby</title>
+<title>Mission Gaïa — Lobby</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head><body class="center">
   <div style="max-width:560px;width:92%">
     <h1>🌍 Mission Gaïa</h1>
     <form method="POST" style="display:flex; gap:8px">
-      <input name="room_code" placeholder="Code équipe (laisser vide pour créer)">
+      <input name="room_code" placeholder="Code équipe (optionnel)">
       <button type="submit">Créer / Rejoindre</button>
     </form>
-    <p style="opacity:.8">Crée une équipe (ou entre un code existant). Des codes joueurs seront générés.</p>
+    <p class="muted">Saisir un code existant ou laisser vide pour créer une nouvelle équipe.</p>
   </div>
 </body></html>
-
