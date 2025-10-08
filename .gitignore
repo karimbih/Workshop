@@ -1,0 +1,28 @@
+# OS / IDE
+.DS_Store
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+env/
+venv/
+
+# Secrets / env
+.env
+*.secret
+*.key
+
+# Bases locales / fichiers runtime
+*.db
+*.sqlite3
+instance/
+_backup_*/
+
+# Build / cache
+dist/
+build/
