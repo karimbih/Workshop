@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Mission Gaïa – Équipe {{ room_code }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+<header>
+  <h2>Équipe {{ room_code }}</h2>
+  <div id="timer">⏳ 03:00</div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <button id="hintBtn" type="button" disabled>Indice</button>
+    <button id="startBtn" type="button" disabled>Démarrer</button>
+  </div>
+</header>
+
+<main>
+  <section id="prompt"></section>
+  <section id="actions">
+    <div id="formArea"></div>
+    <button id="submitBtn" type="button" disabled>Valider</button>
+  </section>
+
+  <aside id="chat">
+    <div style="margin-bottom:8px; font-size:14px; opacity:.8;">
+      Codes joueurs (à distribuer) :
+      <code>{% for p in players %}{{p.code}}{% if not loop.last %}, {% endif %}{% endfor %}</code>
+    </div>
+    <div id="authBox" style="display:flex; gap:6px; margin-bottom:8px;">
+      <input id="playerName" placeholder="Ton pseudo">
+      <input id="playerCode" placeholder="Ton code joueur (ex: A1B2C3)">
+      <button id="authBtn" type="button">Se connecter</button>
+    </div>
+    <div id="chatLog"></div>
+    <div style="display:flex; gap:6px; margin-top:8px;">
+      <input id="chatInput" placeholder="Écrire un message pour l'équipe…" disabled />
+      <button id="chatSend" type="button" disabled>Envoyer</button>
+    </div>
+  </aside>
+</main>
+
+<script>const ROOM = "{{ room_code }}";</script>
+<script src="{{ url_for('static', filename='client.js') }}?v=7"></script>
+</body>
+</html>
+

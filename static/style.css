@@ -1,0 +1,9 @@
+body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#0b1520;color:#e6f0f8}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#0f2231;position:sticky;top:0}
+main{display:grid;grid-template-columns:2fr 1fr;gap:16px;padding:16px}
+#actions,#chat{background:#0f2231;padding:12px;border-radius:10px}
+#chat{height:60vh;overflow:auto;display:flex;flex-direction:column-reverse}
+input,button{padding:10px;border-radius:8px;border:none}
+input{width:100%;margin:.25rem 0;background:#0b1520;color:#e6f0f8}
+button{background:#38bdf8;color:#001018;font-weight:700;cursor:pointer}
+.center{display:grid;place-items:center;height:100vh}

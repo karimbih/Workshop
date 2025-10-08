@@ -1,0 +1,410 @@
+nano static/client.jsconst socket = io();
+
+const $timer = document.getElementById("timer");
+const $prompt = document.getElementById("prompt");
+const $form = document.getElementById("formArea");
+const $start = document.getElementById("startBtn");
+const $submit = document.getElementById("submitBtn");
+const $hint = document.getElementById("hintBtn");
+const $chatLog = document.getElementById("chatLog");
+const $chatInput = document.getElementById("chatInput");
+const $chatSend = document.getElementById("chatSend");
+const $authBtn = document.getElementById("authBtn");
+const $playerName = document.getElementById("playerName");
+const $playerCode = document.getElementById("playerCode");
+
+let AUTH = false;
+let NAME = "";
+let timerInterval = null;
+
+function appendChat(m){
+  const d = document.createElement("div");
+  d.textContent = (m.system ? "ℹ️ " : "") + m.msg;
+  $chatLog.prepend(d);
+}
+
+// --------- Timer local (décrément 1s) ----------
+function formatMMSS(sec){
+  const m = String(Math.floor(sec / 60)).padStart(2, "0");
+  const s = String(sec % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+function startLocalTimer(initial){
+  if (!$timer) return;
+  if (timerInterval) clearInterval(timerInterval);
+  let rem = Math.max(0, parseInt(initial,10) || 0);
+  $timer.textContent = `⏳ ${formatMMSS(rem)}`;
+  timerInterval = setInterval(()=>{
+    rem = Math.max(0, rem - 1);
+    $timer.textContent = `⏳ ${formatMMSS(rem)}`;
+    if (rem <= 0) { clearInterval(timerInterval); timerInterval = null; }
+  }, 1000);
+}
+
+// --------- Auth ----------
+$authBtn?.addEventListener("click", ()=>{
+  const name = ($playerName?.value || "").trim() || "Agent";
+  const pcode = ($playerCode?.value || "").trim().toUpperCase();
+  if(!pcode) return alert("Entre ton code joueur.");
+  socket.emit("auth", { room: ROOM, name, player_code: pcode });
+});
+socket.on("auth_result", ({ok, msg})=>{
+  appendChat({system:true, msg});
+  if(ok){
+    AUTH = true;
+    NAME = ($playerName?.value || "Agent").trim() || "Agent";
+    [$start, $submit, $hint, $chatInput, $chatSend].forEach(el=>{ if(el){ el.disabled = false; }});
+    document.getElementById("authBox")?.remove();
+  }
+});
+
+// --------- UI boutons ----------
+$start?.addEventListener("click", ()=> socket.emit("start", { room: ROOM }));
+$hint?.addEventListener("click", ()=> socket.emit("hint", { room: ROOM }));
+
+$chatSend?.addEventListener("click", sendChat);
+$chatInput?.addEventListener("keydown", (e)=>{ if(e.key==="Enter"){ e.preventDefault(); sendChat(); }});
+function sendChat(){
+  const text = ($chatInput?.value || "").trim();
+  if(!text) return;
+  socket.emit("chat_message", { room: ROOM, name: NAME || "Agent", text });
+  $chatInput.value="";
+}
+socket.on("chat", appendChat);
+
+// --------- State (serveur → client) ----------
+socket.on("state", (st)=>{
+  if (st.finished) {
+    $prompt.innerHTML = st.success ? "<h3>✅ Victoire !</h3>" : "<h3>⛔ Mission terminée.</h3>";
+    $form.innerHTML = "";
+    if ($hint) $hint.textContent = "Indice";
+    if (timerInterval){ clearInterval(timerInterval); timerInterval = null; }
+    return;
+  }
+
+  // Démarre/Resynchronise le chrono local
+  startLocalTimer(st.remaining || 0);
+
+  const p = st.prompt || {};
+  const instruction = (p.instruction || "").replace(/\n/g, "<br>");
+  $prompt.innerHTML = `<h3>${p.title || "Salle"}</h3><p>${instruction}</p>`;
+
+  if ($hint) {
+    const left = ((st.hints?.total) || 0) - ((st.hints?.used) || 0);
+    $hint.textContent = `Indice (${left >= 0 ? left : 0} rest.)`;
+  }
+
+  // ---------- rendu des salles graphiques ----------
+  if (p.type === "climate_v2") {
+    $form.innerHTML = `
+      <img alt="Graphique CO₂" src="${p.image}" style="max-width:100%;border-radius:10px;margin:6px 0;">
+      <div class="row"><input id="answer" placeholder="ppm en 2023" style="max-width:220px"></div>`;
+  }
+  else if (p.type === "waste_v2") {
+    let html = `<div class="card-grid">`;
+    (p.objects||[]).forEach(o=>{
+      html += `<div class="card">
+        <img src="${o.img}" alt="${o.label}">
+        <div style="font-weight:700;margin-top:4px">${o.label}</div>
+        <select data-obj="${o.id}" class="binSelect" style="margin-top:6px;width:100%">
+          <option value="">— Choisir un bac —</option>
+          ${(p.bins||[]).map(b=>`<option value="${b.id}">${b.label}</option>`).join("")}
+        </select>
+      </div>`;
+    });
+    html += `</div>
+      <div class="muted" style="margin-top:8px">Bacs :</div>
+      <div class="card-grid" style="grid-template-columns:repeat(4,minmax(120px,1fr))">
+        ${(p.bins||[]).map(b=>`
+          <div class="card">
+            <img src="${b.img}" alt="${b.label}">
+            <div style="font-weight:700;margin-top:4px">${b.label}</div>
+          </div>`).join("")}
+      </div>`;
+    $form.innerHTML = html;
+  }
+  else if (p.type === "biodiv_v2") {
+    let html = `<div id="dnd" class="card-grid">`;
+    (p.items||[]).forEach(it=>{
+      html += `<div class="card" draggable="true" data-id="${it.id}">
+        <img src="${it.img}" alt="${it.label}">
+        <div style="font-weight:700;margin-top:4px">${it.label}</div>
+      </div>`;
+    });
+    html += `</div><p class="muted">Glisse-dépose pour ordonner (du bas de chaîne au prédateur).</p>`;
+    $form.innerHTML = html;
+
+    const container = document.getElementById("dnd");
+    let dragEl=null;
+    container.querySelectorAll(".card").forEach(el=>{
+      el.addEventListener("dragstart", ()=>{ dragEl=el; el.classList.add("dragging");});
+      el.addEventListener("dragend", ()=>{ el.classList.remove("dragging"); dragEl=null; });
+    });
+    container.addEventListener("dragover", e=>{
+      e.preventDefault();
+      const cards = [...container.querySelectorAll(".card:not(.dragging)")];
+      const after = cards.find(c => e.clientY <= c.getBoundingClientRect().top + c.offsetHeight/2);
+      if(!dragEl) return;
+      if(after) container.insertBefore(dragEl, after);
+      else container.appendChild(dragEl);
+    });
+  }
+  else if (p.type === "energy_v2") {
+    $form.innerHTML = `
+      <img alt="Mix énergétique" src="${p.image}" style="max-width:100%;border-radius:10px;margin:6px 0;">
+      <div class="row"><span class="tag">Total: <span id="mixTotal">0</span>%</span></div>
+      <div class="row">Éolien <input type="range" id="eolien" min="${p.min}" max="${p.max}" value="30" oninput="updateMix()"> <span id="eolienV">30</span>%</div>
+      <div class="row">Solaire <input type="range" id="solaire" min="${p.min}" max="${p.max}" value="30" oninput="updateMix()"> <span id="solaireV">30</span>%</div>
+      <div class="row">Fossile <input type="range" id="fossile" min="${p.min}" max="${p.max}" value="40" oninput="updateMix()"> <span id="fossileV">40</span>%</div>
+      <p class="muted">Condition: total = 100 et fossile ≤ 40.</p>`;
+    window.updateMix = function(){
+      const e = +document.getElementById("eolien").value;
+      const s = +document.getElementById("solaire").value;
+      const f = +document.getElementById("fossile").value;
+      document.getElementById("eolienV").textContent=e;
+      document.getElementById("solaireV").textContent=s;
+      document.getElementById("fossileV").textContent=f;
+      document.getElementById("mixTotal").textContent = e+s+f;
+    };
+    updateMix();
+  }
+  else {
+    $form.innerHTML = "";
+  }
+});
+
+// --------- Submit ----------
+$submit?.addEventListener("click", ()=>{
+  const pAnswer = document.getElementById("answer");      // climate_v2
+  const selects = document.querySelectorAll(".binSelect"); // waste_v2
+  const dnd = document.getElementById("dnd");              // biodiv_v2
+  const eol = document.getElementById("eolien");           // energy_v2
+  const sol = document.getElementById("solaire");
+  const fos = document.getElementById("fossile");
+
+  let payload = {};
+
+  if (pAnswer) payload = { answer: pAnswer.value.trim() };
+
+  if (selects && selects.length){
+    const assign = {};
+    selects.forEach(sel=>{ assign[sel.dataset.obj] = sel.value; });
+    payload = { assign };
+  }
+
+  if (dnd){
+    const ids = [...dnd.querySelectorAll(".card")].map(el=>el.dataset.id);
+    payload = { order: ids };
+  }
+
+  if (eol && sol && fos){
+    payload = { mix: { eolien: +eol.value, solaire: +sol.value, fossile: +fos.value } };
+  }
+
+  socket.emit("submit", { room: ROOM, payload });
+});
+const socket = io();
+
+const $timer = document.getElementById("timer");
+const $prompt = document.getElementById("prompt");
+const $form = document.getElementById("formArea");
+const $start = document.getElementById("startBtn");
+const $submit = document.getElementById("submitBtn");
+const $hint = document.getElementById("hintBtn");
+const $chatLog = document.getElementById("chatLog");
+const $chatInput = document.getElementById("chatInput");
+const $chatSend = document.getElementById("chatSend");
+const $authBtn = document.getElementById("authBtn");
+const $playerName = document.getElementById("playerName");
+const $playerCode = document.getElementById("playerCode");
+
+let AUTH = false;
+let NAME = "";
+let timerInterval = null;
+
+function appendChat(m){
+  const d = document.createElement("div");
+  d.textContent = (m.system ? "ℹ️ " : "") + m.msg;
+  $chatLog.prepend(d);
+}
+
+// --------- Timer local (décrément 1s) ----------
+function formatMMSS(sec){
+  const m = String(Math.floor(sec / 60)).padStart(2, "0");
+  const s = String(sec % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+function startLocalTimer(initial){
+  if (!$timer) return;
+  if (timerInterval) clearInterval(timerInterval);
+  let rem = Math.max(0, parseInt(initial,10) || 0);
+  $timer.textContent = `⏳ ${formatMMSS(rem)}`;
+  timerInterval = setInterval(()=>{
+    rem = Math.max(0, rem - 1);
+    $timer.textContent = `⏳ ${formatMMSS(rem)}`;
+    if (rem <= 0) { clearInterval(timerInterval); timerInterval = null; }
+  }, 1000);
+}
+
+// --------- Auth ----------
+$authBtn?.addEventListener("click", ()=>{
+  const name = ($playerName?.value || "").trim() || "Agent";
+  const pcode = ($playerCode?.value || "").trim().toUpperCase();
+  if(!pcode) return alert("Entre ton code joueur.");
+  socket.emit("auth", { room: ROOM, name, player_code: pcode });
+});
+socket.on("auth_result", ({ok, msg})=>{
+  appendChat({system:true, msg});
+  if(ok){
+    AUTH = true;
+    NAME = ($playerName?.value || "Agent").trim() || "Agent";
+    [$start, $submit, $hint, $chatInput, $chatSend].forEach(el=>{ if(el){ el.disabled = false; }});
+    document.getElementById("authBox")?.remove();
+  }
+});
+
+// --------- UI boutons ----------
+$start?.addEventListener("click", ()=> socket.emit("start", { room: ROOM }));
+$hint?.addEventListener("click", ()=> socket.emit("hint", { room: ROOM }));
+
+$chatSend?.addEventListener("click", sendChat);
+$chatInput?.addEventListener("keydown", (e)=>{ if(e.key==="Enter"){ e.preventDefault(); sendChat(); }});
+function sendChat(){
+  const text = ($chatInput?.value || "").trim();
+  if(!text) return;
+  socket.emit("chat_message", { room: ROOM, name: NAME || "Agent", text });
+  $chatInput.value="";
+}
+socket.on("chat", appendChat);
+
+// --------- State (serveur → client) ----------
+socket.on("state", (st)=>{
+  if (st.finished) {
+    $prompt.innerHTML = st.success ? "<h3>✅ Victoire !</h3>" : "<h3>⛔ Mission terminée.</h3>";
+    $form.innerHTML = "";
+    if ($hint) $hint.textContent = "Indice";
+    if (timerInterval){ clearInterval(timerInterval); timerInterval = null; }
+    return;
+  }
+
+  // Démarre/Resynchronise le chrono local
+  startLocalTimer(st.remaining || 0);
+
+  const p = st.prompt || {};
+  const instruction = (p.instruction || "").replace(/\n/g, "<br>");
+  $prompt.innerHTML = `<h3>${p.title || "Salle"}</h3><p>${instruction}</p>`;
+
+  if ($hint) {
+    const left = ((st.hints?.total) || 0) - ((st.hints?.used) || 0);
+    $hint.textContent = `Indice (${left >= 0 ? left : 0} rest.)`;
+  }
+
+  // ---------- rendu des salles graphiques ----------
+  if (p.type === "climate_v2") {
+    $form.innerHTML = `
+      <img alt="Graphique CO₂" src="${p.image}" style="max-width:100%;border-radius:10px;margin:6px 0;">
+      <div class="row"><input id="answer" placeholder="ppm en 2023" style="max-width:220px"></div>`;
+  }
+  else if (p.type === "waste_v2") {
+    let html = `<div class="card-grid">`;
+    (p.objects||[]).forEach(o=>{
+      html += `<div class="card">
+        <img src="${o.img}" alt="${o.label}">
+        <div style="font-weight:700;margin-top:4px">${o.label}</div>
+        <select data-obj="${o.id}" class="binSelect" style="margin-top:6px;width:100%">
+          <option value="">— Choisir un bac —</option>
+          ${(p.bins||[]).map(b=>`<option value="${b.id}">${b.label}</option>`).join("")}
+        </select>
+      </div>`;
+    });
+    html += `</div>
+      <div class="muted" style="margin-top:8px">Bacs :</div>
+      <div class="card-grid" style="grid-template-columns:repeat(4,minmax(120px,1fr))">
+        ${(p.bins||[]).map(b=>`
+          <div class="card">
+            <img src="${b.img}" alt="${b.label}">
+            <div style="font-weight:700;margin-top:4px">${b.label}</div>
+          </div>`).join("")}
+      </div>`;
+    $form.innerHTML = html;
+  }
+  else if (p.type === "biodiv_v2") {
+    let html = `<div id="dnd" class="card-grid">`;
+    (p.items||[]).forEach(it=>{
+      html += `<div class="card" draggable="true" data-id="${it.id}">
+        <img src="${it.img}" alt="${it.label}">
+        <div style="font-weight:700;margin-top:4px">${it.label}</div>
+      </div>`;
+    });
+    html += `</div><p class="muted">Glisse-dépose pour ordonner (du bas de chaîne au prédateur).</p>`;
+    $form.innerHTML = html;
+
+    const container = document.getElementById("dnd");
+    let dragEl=null;
+    container.querySelectorAll(".card").forEach(el=>{
+      el.addEventListener("dragstart", ()=>{ dragEl=el; el.classList.add("dragging");});
+      el.addEventListener("dragend", ()=>{ el.classList.remove("dragging"); dragEl=null; });
+    });
+    container.addEventListener("dragover", e=>{
+      e.preventDefault();
+      const cards = [...container.querySelectorAll(".card:not(.dragging)")];
+      const after = cards.find(c => e.clientY <= c.getBoundingClientRect().top + c.offsetHeight/2);
+      if(!dragEl) return;
+      if(after) container.insertBefore(dragEl, after);
+      else container.appendChild(dragEl);
+    });
+  }
+  else if (p.type === "energy_v2") {
+    $form.innerHTML = `
+      <img alt="Mix énergétique" src="${p.image}" style="max-width:100%;border-radius:10px;margin:6px 0;">
+      <div class="row"><span class="tag">Total: <span id="mixTotal">0</span>%</span></div>
+      <div class="row">Éolien <input type="range" id="eolien" min="${p.min}" max="${p.max}" value="30" oninput="updateMix()"> <span id="eolienV">30</span>%</div>
+      <div class="row">Solaire <input type="range" id="solaire" min="${p.min}" max="${p.max}" value="30" oninput="updateMix()"> <span id="solaireV">30</span>%</div>
+      <div class="row">Fossile <input type="range" id="fossile" min="${p.min}" max="${p.max}" value="40" oninput="updateMix()"> <span id="fossileV">40</span>%</div>
+      <p class="muted">Condition: total = 100 et fossile ≤ 40.</p>`;
+    window.updateMix = function(){
+      const e = +document.getElementById("eolien").value;
+      const s = +document.getElementById("solaire").value;
+      const f = +document.getElementById("fossile").value;
+      document.getElementById("eolienV").textContent=e;
+      document.getElementById("solaireV").textContent=s;
+      document.getElementById("fossileV").textContent=f;
+      document.getElementById("mixTotal").textContent = e+s+f;
+    };
+    updateMix();
+  }
+  else {
+    $form.innerHTML = "";
+  }
+});
+
+// --------- Submit ----------
+$submit?.addEventListener("click", ()=>{
+  const pAnswer = document.getElementById("answer");      // climate_v2
+  const selects = document.querySelectorAll(".binSelect"); // waste_v2
+  const dnd = document.getElementById("dnd");              // biodiv_v2
+  const eol = document.getElementById("eolien");           // energy_v2
+  const sol = document.getElementById("solaire");
+  const fos = document.getElementById("fossile");
+
+  let payload = {};
+
+  if (pAnswer) payload = { answer: pAnswer.value.trim() };
+
+  if (selects && selects.length){
+    const assign = {};
+    selects.forEach(sel=>{ assign[sel.dataset.obj] = sel.value; });
+    payload = { assign };
+  }
+
+  if (dnd){
+    const ids = [...dnd.querySelectorAll(".card")].map(el=>el.dataset.id);
+    payload = { order: ids };
+  }
+
+  if (eol && sol && fos){
+    payload = { mix: { eolien: +eol.value, solaire: +sol.value, fossile: +fos.value } };
+  }
+
+  socket.emit("submit", { room: ROOM, payload });
+});
