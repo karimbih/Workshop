@@ -99,8 +99,8 @@ $replay?.addEventListener("click", ()=> socket.emit("replay", { room: ROOM }));
 socket.on("state", (st)=>{
   if (st.finished) {
     $prompt.innerHTML = st.success
-      ? `<h3>✅ Mission accomplie !</h3><p>Vous avez <strong>Rejouer</strong> sauvez la planete.</p>`
-      : `<h3>⛔ Mission terminée.</h3><p>Vous avez <strong>Rejouer</strong> ruinez la planete.</p>`;
+      ? `<h3>✅ Mission accomplie !</h3><p>Vous avez <strong>sauvez</strong>la planete.</p>`
+      : `<h3>⛔ Mission terminée.</h3><p>Vous avez <strong>ruinez</strong>la planete.</p>`;
     $form.innerHTML = `
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button id="replayLocal" class="btn">🔁 Rejouer</button>
