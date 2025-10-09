@@ -76,6 +76,14 @@ socket.on("auth_result", ({ok, msg})=>{
     NAME = ($playerName?.value || "Agent").trim() || "Agent";
     [$start, $submit, $hint, $chatInput, $chatSend].forEach(el=>{ if(el){ el.disabled = false; }});
     document.getElementById("authBox")?.remove();
+
+    // === Afficher la popup de contexte ===
+    const modal = document.getElementById("contextModal");
+    modal.style.display = "flex";
+
+    document.getElementById("closeContext").onclick = () => {
+      modal.style.display = "none";
+  };
   }
 });
 
@@ -99,7 +107,7 @@ $replay?.addEventListener("click", ()=> socket.emit("replay", { room: ROOM }));
 socket.on("state", (st)=>{
   if (st.finished) {
     $prompt.innerHTML = st.success
-      ? `<h3>✅ Mission accomplie !</h3><p>Vous avez <strong>sauvez</strong>la planete.</p>`
+      ? `<h3>✅ Mission accomplie !</h3><p>Vous avez <strong>sauvez</strong> la planete.</p>`
       : `<h3>⛔ Mission terminée.</h3><p>Vous avez <strong>ruinez</strong>la planete.</p>`;
     $form.innerHTML = `
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -172,7 +180,7 @@ socket.on("state", (st)=>{
     updateMix();
   }
   else if (p.type === "gaia") {
-    $form.innerHTML = `<input id="date" placeholder="ex: 24/07/2025">`;
+    $form.innerHTML = `<input id="gaiaAnswer">`;
   } else {
     $form.innerHTML = "";
   }
@@ -181,7 +189,7 @@ socket.on("state", (st)=>{
 // ---------- Submit ----------
 $submit?.addEventListener("click", ()=>{
   const ans = document.getElementById("answer");   // salle 2
-  const date = document.getElementById("date");    // salle 4
+  const date = document.getElementById("gaiaAnswer");    // salle 4
   const selects = document.querySelectorAll(".binSelect"); // salle 1
   const e = document.getElementById("eolien");     // salle 3
   const s = document.getElementById("solaire");

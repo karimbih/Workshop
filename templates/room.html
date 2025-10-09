@@ -72,5 +72,50 @@
 
   </div>
 </div>
+
+<!-- Popup de contexte du jeu -->
+<div id="contextModal" style="
+  display:none;
+  position:fixed;
+  top:0; left:0;
+  width:100%; height:100%;
+  background:rgba(0,0,0,0.85);
+  justify-content:center;
+  align-items:center;
+  z-index:1000;
+">
+  <div style="
+    background:#111;
+    color:#fff;
+    padding:25px 30px;
+    border-radius:12px;
+    text-align:center;
+    max-width:600px;
+    width:90%;
+    box-shadow:0 0 15px rgba(0,0,0,0.8);
+    font-family:sans-serif;
+  ">
+    <h2 style="color:#00ff99;">🌍 Mission Gaïa</h2>
+    <p style="font-size:15px; line-height:1.6; margin-top:10px;">
+      Bienvenue, agent&nbsp;!
+      Votre mission est de restaurer l’équilibre écologique de la planète.
+      Vous devrez résoudre plusieurs épreuves&nbsp;: tri des déchets, gestion d’énergie propre, énigmes et décisions environnementales cruciales.
+      Chaque seconde compte, alors travaillez en équipe et sauvez la planète avant qu’il ne soit trop tard !
+    </p>
+    <button id="closeContext" style="
+      margin-top:20px;
+      padding:10px 20px;
+      border:none;
+      border-radius:8px;
+      background:#00ff99;
+      color:#000;
+      font-weight:bold;
+      font-size:16px;
+      cursor:pointer;
+      transition:0.3s;
+    ">Commencer la mission 🚀</button>
+  </div>
+</div>
+
 </body>
 </html>
