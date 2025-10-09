@@ -11,7 +11,6 @@
   <h2>Équipe {{ room_code }}</h2>
   <div id="timer">⏳ 03:00</div>
   <div style="display:flex; gap:8px; align-items:center;">
-    <button id="hintBtn" type="button" disabled>Indice</button>
     <button id="startBtn" type="button" disabled>Démarrer</button>
   </div>
 </header>
@@ -43,6 +42,41 @@
 
 <script>const ROOM = "{{ room_code }}";</script>
 <script src="{{ url_for('static', filename='client.js') }}?v=7"></script>
+<!-- Popup temps écoulé -->
+<div id="timeoutModal" style="
+    display:none;
+    position:fixed;
+    top:0; left:0;
+    width:100%; height:100%;
+    background:rgba(0,0,0,0.8); /* fond semi-transparent noir /
+    justify-content:center;
+    align-items:center;
+    z-index:1000;
+">
+  <div style="
+      background:#111;            / fond noir profond /
+      color:#fff;                 / texte blanc */
+      padding:20px 30px;
+      border-radius:10px;
+      text-align:center;
+      max-width:400px;
+      width:90%;
+      box-shadow:0 0 10px #000;
+  ">
+    <h2>⏰ Temps écoulé !</h2>
+    <p>La partie est terminée.</p>
+    <button id="closeModal" style="
+        margin-top:15px;
+        padding:8px 16px;
+        border:none;
+        border-radius:5px;
+        background:#4CAF50;
+        color:white;
+        font-size:16px;
+        cursor:pointer;
+    ">Rejouer</button>
+  </div>
+</div>
 </body>
 </html>
 

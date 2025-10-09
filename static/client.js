@@ -39,8 +39,26 @@ function startLocalTimer(initial){
   timerInterval = setInterval(()=>{
     rem = Math.max(0, rem-1);
     $timer.textContent = `⏳ ${fmt(rem)}`;
-    if (rem<=0){ clearInterval(timerInterval); timerInterval=null; }
+    if (rem <= 0){
+    clearInterval(timerInterval);
+    timerInterval = null;
+    showTimeoutPopup(); // ← affiche la popup quand le temps est écoulé
+}
   },1000);
+}
+function showTimeoutPopup() {
+  const modal = document.getElementById("timeoutModal");
+  if(!modal) { console.error("❌ Popup non trouvée"); return; }
+  modal.style.display = "flex"; // afficher la popup
+
+  // Désactiver boutons de la salle
+  [$submit, $hint, $start].forEach(el=>{ if(el) el.disabled=true; });
+
+  // Bouton Rejouer
+  document.getElementById("closeModal").onclick = function() {
+    modal.style.display = "none";
+    socket.emit("replay", { room: ROOM }); // Rejouer
+  };
 }
 
 // ---------- Auth ----------
@@ -81,8 +99,8 @@ $replay?.addEventListener("click", ()=> socket.emit("replay", { room: ROOM }));
 socket.on("state", (st)=>{
   if (st.finished) {
     $prompt.innerHTML = st.success
-      ? `<h3>✅ Mission accomplie !</h3><p>Vous pouvez <strong>Rejouer</strong> pour une nouvelle partie.</p>`
-      : `<h3>⛔ Mission terminée.</h3><p>Vous pouvez <strong>Rejouer</strong> pour réessayer.</p>`;
+      ? `<h3>✅ Mission accomplie !</h3><p>Vous avez <strong>Rejouer</strong> sauvez la planete.</p>`
+      : `<h3>⛔ Mission terminée.</h3><p>Vous avez <strong>Rejouer</strong> ruinez la planete.</p>`;
     $form.innerHTML = `
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button id="replayLocal" class="btn">🔁 Rejouer</button>

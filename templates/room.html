@@ -1,23 +1,29 @@
-<!doctype html><html lang="fr"><head>
-<meta charset="utf-8"/>
-<title>The Green Mission — Équipe {{ room_code }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-</head><body>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>The Green Mission – Équipe {{ room_code }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
 <header>
   <h2>Équipe {{ room_code }}</h2>
-  <div id="timer">⏳ 02:00</div>
+  <div id="timer">⏳ 03:00</div>
   <div style="display:flex; gap:8px; align-items:center;">
     <button id="startBtn" type="button" disabled>Démarrer</button>
     <button id="replayBtn" type="button" class="ghost">Rejouer</button>
   </div>
 </header>
+
 <main>
   <section id="prompt"></section>
+
   <section id="actions">
     <div id="formArea"></div>
     <button id="submitBtn" type="button" disabled>Valider</button>
   </section>
+
   <aside id="chat">
     <div style="margin-bottom:8px; font-size:14px; opacity:.8;">
       Codes joueurs (à distribuer) :
@@ -30,11 +36,50 @@
     </div>
     <div id="chatLog"></div>
     <div style="display:flex; gap:6px; margin-top:8px;">
-      <input id="chatInput" placeholder="Message à l'équipe…" disabled />
+      <input id="chatInput" placeholder="Écrire un message pour l'équipe…" disabled />
       <button id="chatSend" type="button" disabled>Envoyer</button>
     </div>
   </aside>
 </main>
+
+
+
 <script>const ROOM = "{{ room_code }}";</script>
-<script src="{{ url_for('static', filename='client.js') }}?v=99"></script>
-</body></html>
+<script src="{{ url_for('static', filename='client.js') }}?v=7"></script>
+<!-- Popup temps écoulé -->
+<div id="timeoutModal" style="
+    display:none;
+    position:fixed;
+    top:0; left:0;
+    width:100%; height:100%;
+    background:rgba(0,0,0,0.8); /* fond semi-transparent noir /
+    justify-content:center;
+    align-items:center;
+    z-index:1000;
+">
+  <div style="
+      background:#111;            / fond noir profond /
+      color:#fff;                 / texte blanc */
+      padding:20px 30px;
+      border-radius:10px;
+      text-align:center;
+      max-width:400px;
+      width:90%;
+      box-shadow:0 0 10px #000;
+  ">
+    <h2>⏰ Temps écoulé !</h2>
+    <p>La partie est terminée.</p>
+    <button id="closeModal" style="
+        margin-top:15px;
+        padding:8px 16px;
+        border:none;
+        border-radius:5px;
+        background:#4CAF50;
+        color:white;
+        font-size:16px;
+        cursor:pointer;
+    ">Rejouer</button>
+  </div>
+</div>
+</body>
+</html>
