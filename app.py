@@ -1,5 +1,5 @@
 import os, secrets, time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from flask import Flask, render_template, request, redirect, url_for
 from flask_socketio import SocketIO, join_room, emit
 from sqlmodel import SQLModel, Session, create_engine, select
@@ -7,6 +7,7 @@ from models import Room, Player
 from services import game_state
 from services.mqtt_bridge import led, buzzer, chrono_color
 
+# ------------------ DB / APP / SOCKET ------------------
 DB_URI = os.getenv("DB_URI", "sqlite:///mission_gaia.db")
 engine = create_engine(DB_URI, echo=False)
 SQLModel.metadata.create_all(engine)
@@ -15,24 +16,23 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev")
 socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*")
 
-# Durées par salle (sec)
-STAGE_DURATIONS = {0: 120, 1: 120, 2: 180, 3: 180}
-
-# Indices (facultatif)
+# ------------------ MEMOIRES EN RAM ------------------
 _HINTS: dict[str, dict[str, int]] = {}
+_SUMMARY: dict[str, list] = {}
 _WATCHERS: set[str] = set()
 
-def utcnow():
-    return datetime.now(timezone.utc)
+# --- NEW : Codes par salle & stockage par room
+_STAGE_CODES = {     # index d'étape -> code
+    0: 2390,         # Salle 1 (Tri)
+    1: 2400,         # Salle 2 (Abeille)
+    2: 2431,         # Salle 3 (Energie 180 MW)
+}
+_CODES: dict[str, dict[int, int]] = {}  # room_code -> {stage_index: code}
 
-def as_aware(dt):
-    if dt is None: return None
-    if dt.tzinfo is None: return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-def get_room(code: str) -> Room|None:
+# ------------------ HELPERS ------------------
+def get_room(code: str) -> Room | None:
     with Session(engine) as s:
-        return s.exec(select(Room).where(Room.code==code)).first()
+        return s.exec(select(Room).where(Room.code == code)).first()
 
 def save(obj):
     with Session(engine) as s:
@@ -40,29 +40,33 @@ def save(obj):
 
 def list_players(code: str):
     with Session(engine) as s:
-        return s.exec(select(Player).where(Player.room_code==code)).all()
+        return s.exec(select(Player).where(Player.room_code == code)).all()
 
-def get_player(code_room: str, code_player: str) -> Player|None:
+def get_player(code_room: str, code_player: str) -> Player | None:
     with Session(engine) as s:
-        return s.exec(select(Player).where(Player.room_code==code_room, Player.code==code_player)).first()
-
-def ensure_stage_start(r: Room):
-    if not r.stage_started_at:
-        r.stage_started_at = utcnow()
-        save(r)
+        return s.exec(select(Player).where(
+            Player.room_code == code_room,
+            Player.code == code_player
+        )).first()
 
 def remaining_stage_time(r: Room) -> int:
-    start = as_aware(r.stage_started_at)
-    if not start:
+    """Temps restant en secondes pour l'étape courante."""
+    if not r.stage_started_at:
         return r.stage_duration_sec
-    elapsed = int((utcnow() - start).total_seconds())
+    # On normalise en timezone-aware UTC si besoin
+    started = r.stage_started_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    elapsed = int((datetime.now(timezone.utc) - started).total_seconds())
     return max(0, r.stage_duration_sec - elapsed)
 
 def hints_info(code: str, stage: int) -> dict:
     hs = _HINTS.get(code) or {"stage": stage, "used": 0}
     if hs["stage"] != stage:
         hs = {"stage": stage, "used": 0}; _HINTS[code] = hs
-    return {"used": hs["used"], "total": 0}  # pas d'indices textuels ici
+    p = game_state.PUZZLES[stage] if stage < game_state.total_stages() else None
+    total = len(getattr(p, "hints", [])) if p else 0
+    return {"used": hs["used"], "total": total}
 
 def state_payload(r: Room):
     prompt = None
@@ -75,12 +79,16 @@ def state_payload(r: Room):
         "remaining": remaining_stage_time(r),
         "finished": r.is_finished,
         "success": r.success,
-        "score": r.score,
         "hints": hints_info(r.code, r.current_stage)
     }
 
+def reset_trackers(code: str, stage: int):
+    _HINTS[code] = {"stage": stage, "used": 0}
+    _SUMMARY[code] = []
+    _CODES[code] = {}               # --- NEW : reset des codes pour cette room
+
 def generate_player_codes(n=4):
-    return [secrets.token_hex(3).upper() for _ in range(n)]
+    return [secrets.token_hex(3).upper() for _ in range(n)]  # 6 chars
 
 def start_watcher(code: str):
     if code in _WATCHERS: return
@@ -100,35 +108,41 @@ def start_watcher(code: str):
 
             if not r.is_finished and rem <= 0:
                 r.missed_count += 1
-                r.wrong_attempts = 0
                 r.current_stage += 1
                 if r.current_stage >= game_state.total_stages():
                     r.is_finished = True
                     r.success = (r.missed_count == 0)
                 else:
-                    r.stage_started_at = utcnow()
-                    r.stage_duration_sec = STAGE_DURATIONS.get(r.current_stage, r.stage_duration_sec)
+                    r.stage_started_at = datetime.now(timezone.utc)
+                    _HINTS[code] = {"stage": r.current_stage, "used": 0}
                 save(r)
-                socketio.emit("chat", {"system":True, "msg":"⏰ Temps écoulé. Passage à la salle suivante."}, room=code)
+                socketio.emit("chat", {"system":True, "msg":"⏰ Temps écoulé pour cette énigme. Passage à la suivante."}, room=code)
                 socketio.emit("state", state_payload(r), room=code)
-                if r.is_finished: break
+                if r.is_finished:
+                    socketio.emit("summary", {"items": _SUMMARY.get(code, [])}, room=code)
+                    break
             if r.is_finished: break
-            time.sleep(1.0)
+            time.sleep(1.2)
         chrono_color(code, "off")
         _WATCHERS.discard(code)
     socketio.start_background_task(_run)
 
+# ------------------ ROUTES ------------------
 @app.route("/", methods=["GET","POST"])
 def index():
-    if request.method=="POST":
-        code = request.form.get("room_code") or secrets.token_hex(2).upper()
+    if request.method == "POST":
+        code_form = (request.form.get("room_code") or "").strip()
+        team_name = (request.form.get("team_name") or "").strip()
+        code = code_form or secrets.token_hex(2).upper()
+
         r = get_room(code)
         if not r:
-            r = save(Room(code=code, stage_duration_sec=STAGE_DURATIONS.get(0,120)))
+            r = save(Room(code=code, team_name=team_name or f"Équipe {code}"))
             with Session(engine) as s:
                 for c in generate_player_codes(4):
                     s.add(Player(room_code=code, code=c))
                 s.commit()
+        reset_trackers(code, r.current_stage)
         return redirect(url_for("room", code=code))
     return render_template("index.html")
 
@@ -136,9 +150,11 @@ def index():
 def room(code):
     r = get_room(code)
     if not r: return redirect(url_for("index"))
+    if code not in _HINTS: reset_trackers(code, r.current_stage)
     players = list_players(code)
     return render_template("room.html", room_code=code, players=players)
 
+# ------------------ SOCKETS ------------------
 @socketio.on("auth")
 def on_auth(data):
     room_code = data.get("room")
@@ -159,18 +175,16 @@ def on_auth(data):
 def on_start(data):
     code = data.get("room"); r = get_room(code)
     if not r: return
-    # Autoriser le start si partie finie (rejouer via start)
+    # Autoriser démarrage même si partie finie (pour Rejouer), ou vérifier min 2 joueurs si partie neuve
     if r.started_at and not r.is_finished:
+        emit("chat", {"system":True, "msg":"La mission est déjà en cours."}, room=code)
         return
-    # démarrage / redémarrage
-    r.is_finished = False; r.success=False
-    r.current_stage = 0
-    r.missed_count = 0
-    r.wrong_attempts = 0
-    r.score = 0
-    r.started_at = utcnow()
-    r.stage_started_at = utcnow()
-    r.stage_duration_sec = STAGE_DURATIONS.get(0, 120)
+    # Démarrage/Redémarrage
+    r.started_at = datetime.now(timezone.utc)
+    r.stage_started_at = datetime.now(timezone.utc)
+    r.is_finished = False
+    r.success = False
+    r.current_stage = 0 if r.missed_count > 0 or r.started_at else r.current_stage
     save(r)
     start_watcher(code)
     emit("chat", {"system":True,"msg":"La mission démarre !"}, room=code)
@@ -180,24 +194,31 @@ def on_start(data):
 def on_replay(data):
     code = data.get("room"); r = get_room(code)
     if not r: return
-    r.is_finished = False; r.success=False
-    r.current_stage = 0
+    # Remise à zéro contrôlée (sans toucher à la DB structurelle)
+    r.is_finished = False
+    r.success = False
     r.missed_count = 0
-    r.wrong_attempts = 0
-    r.score = 0
-    r.started_at = utcnow()
-    r.stage_started_at = utcnow()
-    r.stage_duration_sec = STAGE_DURATIONS.get(0, 120)
+    r.current_stage = 0
+    r.stage_started_at = datetime.now(timezone.utc)
     save(r)
+    reset_trackers(code, 0)
     start_watcher(code)
-    emit("chat", {"system":True,"msg":"🔁 Rejouer : partie relancée."}, room=code)
+    emit("chat", {"system":True,"msg":"🔁 Rejouer : la salle a été réinitialisée."}, room=code)
     emit("state", state_payload(r), room=code)
 
 @socketio.on("hint")
 def on_hint(data):
     code = data.get("room"); r = get_room(code)
     if not r or r.is_finished: return
-    emit("chat", {"system":True, "msg": "Indices non disponibles sur cette version."}, room=code)
+    hs = _HINTS.get(code) or {"stage": r.current_stage, "used": 0}
+    if hs["stage"] != r.current_stage:
+        hs = {"stage": r.current_stage, "used": 0}; _HINTS[code]=hs
+    nxt = game_state.get_hint(r.current_stage, hs["used"])
+    if nxt:
+        hs["used"] += 1
+        emit("chat", {"system":True, "msg": f"🧩 Indice {hs['used']}: {nxt}"}, room=code)
+    else:
+        emit("chat", {"system":True, "msg": "Aucun indice supplémentaire disponible."}, room=code)
     emit("state", state_payload(r), room=code)
 
 @socketio.on("chat_message")
@@ -206,19 +227,6 @@ def on_chat_message(data):
     name = (data.get("name") or "Agent").strip()
     if not code or not text: return
     emit("chat", {"system":False, "msg": f"{name}: {text}"}, room=code)
-
-def advance_to_next_stage(r: Room, award_score: int):
-    if award_score > 0:
-        r.score += award_score
-    r.current_stage += 1
-    r.wrong_attempts = 0
-    if r.current_stage >= game_state.total_stages():
-        r.is_finished=True
-        r.success = True
-    else:
-        r.stage_started_at = utcnow()
-        r.stage_duration_sec = STAGE_DURATIONS.get(r.current_stage, r.stage_duration_sec)
-    save(r)
 
 @socketio.on("submit")
 def on_submit(data):
@@ -229,29 +237,64 @@ def on_submit(data):
         return
     cur = r.current_stage
     ok = game_state.validate_stage(cur, payload)
-    if ok:
-        led(code, True); buzzer(code, 120)
-        emit("chat", {"system":True,"msg":"✅ Bonne réponse !"}, room=code)
-        # score
-        award = game_state.stage_score(cur)
-        advance_to_next_stage(r, award)
-        emit("state", state_payload(r), room=code)
-    else:
-        r.wrong_attempts += 1
-        save(r)
-        buzzer(code, 300)
-        # règle spéciale salle 2 : -30s
-        if cur == 1 and r.stage_started_at:
-            r.stage_started_at = as_aware(r.stage_started_at) - timedelta(seconds=30)
-            save(r)
-            emit("chat", {"system":True,"msg":"❌ Mauvaise réponse — la biodiversité s’effondre… (-30s)"}, room=code)
-        else:
-            emit("chat", {"system":True,"msg":"❌ Mauvaise réponse."}, room=code)
-        # si >2 erreurs, 0 point et on avance
-        if r.wrong_attempts >= 2:
-            emit("chat", {"system":True,"msg":"😕 Trop d'erreurs sur cette salle — 0 point. On avance."}, room=code)
-            advance_to_next_stage(r, 0)
-        emit("state", state_payload(r), room=code)
 
+    if ok:
+        # --- Feedback matériel
+        led(code, True); buzzer(code, 120)
+
+        # --- Débrief éventuel
+        debrief = game_state.get_debrief(cur)
+        if debrief:
+            prompt = game_state.get_stage_prompt(cur)
+            _SUMMARY.setdefault(code, []).append({
+                "stage": cur,
+                "title": prompt.get("title",""),
+                "debrief": debrief
+            })
+            emit("chat", {"system":True,"msg":"🎓 Débrief: " + debrief}, room=code)
+
+        # --- NEW : code de l'étape
+        if cur in _STAGE_CODES:
+            val = _STAGE_CODES[cur]
+            _CODES.setdefault(code, {})[cur] = val
+            emit("chat", {"system": True, "msg": f"🔐 Code {cur+1} = {val}"}, room=code)
+
+        # Passage à l'étape suivante
+        r.current_stage += 1
+        if r.current_stage >= game_state.total_stages():
+            r.is_finished=True
+            r.success = (r.missed_count == 0)
+        else:
+            r.stage_started_at = datetime.now(timezone.utc)
+        save(r)
+
+        # --- NEW : à l’entrée en salle 4, donner l’indice final
+        if not r.is_finished and r.current_stage == 3:
+            cs = _CODES.get(code, {})
+            if all(k in cs for k in (0, 1, 2)):
+                total = cs[0] + cs[1] + cs[2]
+                moyenne = round(total / 3)
+                emit(
+                    "chat",
+                    {"system": True,
+                     "msg": f"🧩 Indice final : faites la moyenne des 3 codes. "
+                            f"(Code1 + Code2 + Code3) / 3 = {moyenne}. "
+                            f"Interprétez-le comme JJMM pour trouver la date."},
+                    room=code
+                )
+
+        _HINTS[code] = {"stage": r.current_stage, "used": 0}
+        emit("chat", {"system":True,"msg":"✅ Énigme réussie !"}, room=code)
+
+    else:
+        buzzer(code, 300)
+        emit("chat", {"system":True,"msg":"❌ Mauvaise réponse."}, room=code)
+
+    emit("state", state_payload(r), room=code)
+    if r.is_finished:
+        socketio.emit("summary", {"items": _SUMMARY.get(code, [])}, room=code)
+
+# ------------------ MAIN ------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 5050)))
+
